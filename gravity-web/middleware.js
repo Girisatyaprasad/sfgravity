@@ -19,14 +19,9 @@ export const config = {
 export default function middleware(request) {
   const countryCode = resolveCountryCode(request);
   const response = next();
+  const cookie = `gravity_country=${countryCode}; Path=/; Max-Age=2592000; SameSite=Lax; Secure`;
 
-  response.cookies.set('gravity_country', countryCode, {
-    path: '/',
-    maxAge: 2592000,
-    sameSite: 'lax',
-    secure: true,
-    httpOnly: false,
-  });
+  response.headers.append('Set-Cookie', cookie);
 
   return response;
 }
