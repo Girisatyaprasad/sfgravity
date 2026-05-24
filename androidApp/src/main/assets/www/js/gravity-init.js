@@ -45,6 +45,12 @@
     T4: { cls: 'ad-tier-t4', unit: 'sfgravity-t4-house' }
   };
 
+  var DURATION_ERRORS = {
+    US: 'This video is longer than 3 minutes and cannot be downloaded.',
+    IN: 'Videos over 3 minutes are not supported on SaveFromGravity.',
+    DEFAULT: 'Video length exceeds the 180 second limit.'
+  };
+
   var COPY = {
     instagram: {
       US: {
@@ -446,7 +452,9 @@
     'composer.aria': copy['composer.aria'],
     'ad.label': copy['ad.label'],
     'ad.title': copy['ad.title'],
-    'ad.desc': copy['ad.desc']
+    'ad.desc': copy['ad.desc'],
+    'error.duration_exceeded':
+      DURATION_ERRORS[cluster] || DURATION_ERRORS.DEFAULT
   });
 
   var context = Object.freeze({

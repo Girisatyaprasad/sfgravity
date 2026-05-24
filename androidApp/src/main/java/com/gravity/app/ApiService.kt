@@ -1,68 +1,60 @@
 package com.gravity.app
 
+import okhttp3.Cookie
+import okhttp3.CookieJar
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-/** In-app API — extract + proxy (no external server required on phone). */
+/** In-app page fetch + media proxy for SaveFromGravity WebView. */
 class ApiService {
 
   private val client = OkHttpClient.Builder()
     .connectTimeout(60, TimeUnit.SECONDS)
     .readTimeout(120, TimeUnit.SECONDS)
     .followRedirects(true)
+    .cookieJar(object : CookieJar {
+      override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {}
+      override fun loadForRequest(url: HttpUrl): List<Cookie> = emptyList()
+    })
     .build()
 
-  private val video1080 =
-    "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4"
-  private val video720 =
-    "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4"
-  private val video480 = "https://filesamples.com/samples/video/mp4/sample_640x360.mp4"
-  private val audioTrack = "https://filesamples.com/samples/audio/mp3/sample3.mp3"
+  private val desktopUa =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
-  fun extract(url: String): String {
-    val platform = detectPlatform(url)
-    val title: String
-    val qualities: JSONArray
+  private val maxPageBytes = 5 * 1024 * 1024
 
-    when (platform) {
-      "youtube" -> {
-        title = "Cinematic Sunset Short"
-        qualities = JSONArray().apply {
-          put(qualityMux("1080p", video1080, audioTrack))
-          put(qualityDirect("720p", video720))
-          put(qualityDirect("480p", video480))
-        }
-      }
-      "instagram" -> {
-        title = "Creative IG Reels Post"
-        qualities = JSONArray().apply {
-          put(qualityDirect("1080p", video720))
-          put(qualityDirect("720p", video480))
-        }
-      }
-      "facebook" -> {
-        title = "Facebook Reels Viral Highlight"
-        qualities = JSONArray().apply {
-          put(qualityDirect("1080p", video480))
-          put(qualityDirect("720p", video480))
-        }
-      }
-      else -> {
-        title = "Imported Web Stream Clip"
-        qualities = JSONArray().apply {
-          put(qualityDirect("Best quality", video720))
-        }
+  fun fetchPage(url: String, optionsJson: String?): String {
+    var ua = desktopUa
+    var maxBytes = maxPageBytes
+    if (!optionsJson.isNullOrBlank()) {
+      try {
+        val opts = JSONObject(optionsJson)
+        if (opts.has("userAgent")) ua = opts.getString("userAgent")
+        if (opts.has("maxBytes")) maxBytes = opts.getInt("maxBytes").coerceIn(1024, maxPageBytes)
+      } catch (_: Exception) {
       }
     }
 
-    return JSONObject().apply {
-      put("title", title)
-      put("platform", platform)
-      put("qualities", qualities)
-    }.toString()
+    val request = Request.Builder()
+      .url(url)
+      .header("User-Agent", ua)
+      .header("Accept", "text/html,application/json,*/*")
+      .header("Accept-Language", "en-US,en;q=0.9")
+      .build()
+
+    client.newCall(request).execute().use { response ->
+      if (!response.isSuccessful) {
+        throw IllegalStateException("Upstream HTTP ${response.code}")
+      }
+      val bytes = response.body?.bytes() ?: throw IllegalStateException("Empty response")
+      if (bytes.size > maxBytes) {
+        throw IllegalStateException("Page exceeds ${maxBytes / (1024 * 1024)}MB cap")
+      }
+      return String(bytes, Charsets.UTF_8)
+    }
   }
 
   fun proxyFetch(url: String): ByteArray {
@@ -81,27 +73,5 @@ class ApiService {
       }
       return response.body?.bytes() ?: throw IllegalStateException("Empty response")
     }
-  }
-
-  private fun detectPlatform(url: String): String {
-    val lower = url.lowercase()
-    return when {
-      "youtube.com" in lower || "youtu.be" in lower -> "youtube"
-      "instagram.com" in lower -> "instagram"
-      "facebook.com" in lower || "fb.watch" in lower -> "facebook"
-      else -> "other"
-    }
-  }
-
-  private fun qualityDirect(label: String, downloadUrl: String) = JSONObject().apply {
-    put("label", label)
-    put("downloadUrl", downloadUrl)
-  }
-
-  private fun qualityMux(label: String, videoUrl: String, audioUrl: String) = JSONObject().apply {
-    put("label", label)
-    put("isMuxRequired", true)
-    put("videoUrl", videoUrl)
-    put("audioUrl", audioUrl)
   }
 }

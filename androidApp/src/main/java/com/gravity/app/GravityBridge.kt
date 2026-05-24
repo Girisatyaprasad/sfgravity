@@ -9,6 +9,8 @@ import android.util.Base64
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import java.io.File
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
 
 class GravityBridge(
@@ -23,6 +25,8 @@ class GravityBridge(
     "(https?://[^\\s<>\"']+)",
     Pattern.CASE_INSENSITIVE
   )
+
+  private val ioExecutor = Executors.newCachedThreadPool()
 
   fun extractUrlFromText(text: String?): String? {
     if (text.isNullOrBlank()) return null
@@ -46,18 +50,22 @@ class GravityBridge(
   }
 
   @JavascriptInterface
-  fun extract(url: String): String {
+  fun fetchPage(url: String, optionsJson: String): String {
     return try {
-      api.extract(url)
+      ioExecutor.submit<String> {
+        api.fetchPage(url, optionsJson)
+      }.get(120, TimeUnit.SECONDS)
     } catch (e: Exception) {
-      JSONObjectError("Failed to extract", e.message)
+      "ERROR:${e.message ?: "page fetch failed"}"
     }
   }
 
   @JavascriptInterface
   fun proxyFetchBase64(url: String): String {
     return try {
-      val bytes = api.proxyFetch(url)
+      val bytes = ioExecutor.submit<ByteArray> {
+        api.proxyFetch(url)
+      }.get(120, TimeUnit.SECONDS)
       Base64.encodeToString(bytes, Base64.NO_WRAP)
     } catch (e: Exception) {
       "ERROR:${e.message ?: "fetch failed"}"
@@ -113,12 +121,5 @@ class GravityBridge(
     val file = File(dir, safeName)
     file.writeBytes(bytes)
     return file.absolutePath
-  }
-
-  private fun JSONObjectError(error: String, details: String?): String {
-    return org.json.JSONObject().apply {
-      put("error", error)
-      if (details != null) put("details", details)
-    }.toString()
   }
 }

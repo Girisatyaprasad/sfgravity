@@ -146,6 +146,49 @@ function readBody(req) {
   });
 }
 
+const DESKTOP_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const MAX_PAGE_BYTES = 5 * 1024 * 1024;
+
+function fetchPageUpstream(target, res, cors) {
+  const lib = target.startsWith('https') ? https : http;
+  lib
+    .get(
+      target,
+      {
+        headers: {
+          'User-Agent': DESKTOP_UA,
+          Accept: 'text/html,application/json,*/*',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+      },
+      (proxyRes) => {
+        const chunks = [];
+        let total = 0;
+        proxyRes.on('data', (c) => {
+          total += c.length;
+          if (total <= MAX_PAGE_BYTES) chunks.push(c);
+        });
+        proxyRes.on('end', () => {
+          if (total > MAX_PAGE_BYTES) {
+            res.writeHead(413, cors);
+            res.end(JSON.stringify({ error: 'Page exceeds 5MB cap' }));
+            return;
+          }
+          res.writeHead(proxyRes.statusCode || 200, {
+            ...cors,
+            'Content-Type': 'text/plain; charset=utf-8',
+          });
+          res.end(Buffer.concat(chunks).toString('utf-8'));
+        });
+      }
+    )
+    .on('error', (e) => {
+      res.writeHead(502, cors);
+      res.end(JSON.stringify({ error: e.message }));
+    });
+}
+
 async function handleApi(req, res) {
   const cors = {
     'Access-Control-Allow-Origin': '*',
@@ -172,6 +215,17 @@ async function handleApi(req, res) {
       res.writeHead(400, cors);
       res.end(JSON.stringify({ error: 'Invalid request' }));
     }
+    return;
+  }
+
+  if (req.url.startsWith('/api/fetch-page')) {
+    const target = new URL(req.url, 'http://localhost').searchParams.get('url');
+    if (!target) {
+      res.writeHead(400, cors);
+      res.end(JSON.stringify({ error: 'url required' }));
+      return;
+    }
+    fetchPageUpstream(target, res, cors);
     return;
   }
 

@@ -15,7 +15,45 @@
     muxing: 'Processing video'
   };
 
-  /* Resolve API URL — config.js → meta tag → smart fallback */
+  var DESKTOP_UA =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+  var FETCH_OPTS = JSON.stringify({
+    userAgent: DESKTOP_UA,
+    maxBytes: 5242880,
+    cookieIsolation: true
+  });
+  var MAX_DURATION_SEC = 180;
+
+  var engine = {
+    platformKey: 'generic',
+    countryCode: 'US',
+    languageKey: 'en-US',
+    copy: {}
+  };
+
+  var YT_VIDEO_LABELS = {
+    137: '1080p', 248: '1080p', 136: '720p', 247: '720p',
+    135: '480p', 244: '480p', 134: '360p', 133: '240p', 160: '144p'
+  };
+
+  function syncEngineFromGravity(ctx) {
+    if (!ctx) return;
+    engine.platformKey = ctx.platformKey || engine.platformKey;
+    engine.countryCode = ctx.countryCode || engine.countryCode;
+    engine.languageKey = ctx.languageKey || engine.languageKey;
+    engine.copy = ctx.copy || engine.copy;
+  }
+
+  function readEngineFromWindow() {
+    syncEngineFromGravity(window.__GRAVITY__);
+  }
+
+  document.addEventListener('gravity:ready', function (e) {
+    syncEngineFromGravity(e.detail || window.__GRAVITY__);
+  }, { once: true });
+
+  if (window.__GRAVITY__) readEngineFromWindow();
+
   function isNativeApp() {
     return !!(window.GravityNative && window.GravityNative.isApp && window.GravityNative.isApp());
   }
@@ -25,15 +63,316 @@
     if (window.GRAVITY_API) return window.GRAVITY_API.replace(/\/$/, '');
     var meta = document.querySelector('meta[name="gravity-api"]');
     if (meta && meta.content) return meta.content.replace(/\/$/, '');
-    if (location.protocol === 'file:') return 'http://localhost:3000';
+    if (location.protocol === 'file:') return 'http://localhost:3001';
     if (location.port === '3001') return '';
     return '';
   }
 
-  function nativeExtract(url) {
-    var json = window.GravityNative.extract(url);
-    var data = JSON.parse(json);
-    if (data.error) throw new Error(data.error);
+  function durationErrorMsg() {
+    return (engine.copy && engine.copy['error.duration_exceeded']) ||
+      'Video too long (max 3 min)';
+  }
+
+  function detectPlatformFromUrl(url) {
+    var lower = (url || '').toLowerCase();
+    if (/youtube\.com|youtu\.be/.test(lower)) return 'youtube';
+    if (/instagram\.com/.test(lower)) return 'instagram';
+    if (/facebook\.com|fb\.watch/.test(lower)) return 'facebook';
+    return engine.platformKey !== 'generic' ? engine.platformKey : 'generic';
+  }
+
+  function ingestPage(url) {
+    if (isNativeApp() && window.GravityNative.fetchPage) {
+      var body = window.GravityNative.fetchPage(url, FETCH_OPTS);
+      if (!body || body.indexOf('ERROR:') === 0) {
+        throw new Error(body ? body.slice(6) : 'Page fetch failed');
+      }
+      return body;
+    }
+    return fetchPageWeb(url);
+  }
+
+  function fetchPageWeb(url) {
+    var apiBase = getApiBase();
+    var endpoint = apiBase + '/api/fetch-page?url=' + encodeURIComponent(url);
+    return fetch(endpoint).then(function (res) {
+      if (!res.ok) {
+        return res.json().catch(function () { return {}; }).then(function (err) {
+          throw new Error(err.error || ('Page fetch HTTP ' + res.status));
+        });
+      }
+      return res.text();
+    });
+  }
+
+  function extractBalancedJson(text, startIdx) {
+    var i = startIdx;
+    var depth = 0;
+    var inStr = false;
+    var esc = false;
+    for (; i < text.length; i++) {
+      var ch = text.charAt(i);
+      if (inStr) {
+        if (esc) { esc = false; continue; }
+        if (ch === '\\') { esc = true; continue; }
+        if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') { inStr = true; continue; }
+      if (ch === '{') depth++;
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0) return text.slice(startIdx, i + 1);
+      }
+    }
+    return null;
+  }
+
+  function decodeEscapes(str) {
+    if (!str) return str;
+    return str
+      .replace(/\\u0026/g, '&')
+      .replace(/\\\//g, '/')
+      .replace(/\\"/g, '"');
+  }
+
+  function ensureHttps(raw) {
+    if (!raw) return '';
+    var u = decodeEscapes(raw.trim());
+    if (u.indexOf('//') === 0) u = 'https:' + u;
+    if (u.indexOf('http://') === 0) u = 'https://' + u.slice(7);
+    return u;
+  }
+
+  function uniqUrls(list) {
+    var seen = {};
+    var out = [];
+    list.forEach(function (u) {
+      var n = ensureHttps(u);
+      if (n && !seen[n]) { seen[n] = true; out.push(n); }
+    });
+    return out;
+  }
+
+  function metaContent(html, prop) {
+    var re = new RegExp('<meta[^>]+property="' + prop + '"[^>]+content="([^"]+)"', 'i');
+    var m = html.match(re);
+    if (m) return decodeEscapes(m[1]);
+    re = new RegExp('<meta[^>]+content="([^"]+)"[^>]+property="' + prop + '"', 'i');
+    m = html.match(re);
+    return m ? decodeEscapes(m[1]) : '';
+  }
+
+  function titleFromHtml(html) {
+    var og = metaContent(html, 'og:title');
+    if (og) return og;
+    var m = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+    return m ? m[1].trim() : 'Video';
+  }
+
+  function parseInstagram(html, url) {
+    var title = titleFromHtml(html);
+    var urls = [];
+    var re;
+
+    re = /"video_url"\s*:\s*"([^"]+)"/g;
+    var m;
+    while ((m = re.exec(html)) !== null) urls.push(m[1]);
+
+    re = /"playback_url"\s*:\s*"([^"]+)"/g;
+    while ((m = re.exec(html)) !== null) urls.push(m[1]);
+
+    re = /"video_versions"\s*:\s*(\[[\s\S]*?\])/g;
+    while ((m = re.exec(html)) !== null) {
+      try {
+        var versions = JSON.parse(m[1]);
+        versions.forEach(function (v) {
+          if (v && v.url) urls.push(v.url);
+        });
+      } catch (_e) { /* skip */ }
+    }
+
+    var ogVideo = metaContent(html, 'og:video') || metaContent(html, 'og:video:url');
+    if (ogVideo) urls.push(ogVideo);
+
+    urls = uniqUrls(urls).filter(function (u) { return /\.mp4/i.test(u); });
+    if (!urls.length) throw new Error('No Instagram stream found');
+
+    var qualities = urls.map(function (u, i) {
+      return {
+        label: i === 0 ? 'Best quality' : ('Quality ' + (i + 1)),
+        downloadUrl: u
+      };
+    });
+
+    return {
+      title: title,
+      platform: 'instagram',
+      durationSeconds: null,
+      qualities: qualities
+    };
+  }
+
+  function formatHasDirectUrl(f) {
+    return f && f.url && !f.signatureCipher && !f.cipher;
+  }
+
+  function parseYouTube(html) {
+    var marker = 'ytInitialPlayerResponse';
+    var idx = html.indexOf(marker);
+    if (idx === -1) throw new Error('YouTube player data not found');
+
+    var brace = html.indexOf('{', idx);
+    var jsonText = extractBalancedJson(html, brace);
+    if (!jsonText) throw new Error('YouTube JSON parse failed');
+
+    var data = JSON.parse(jsonText);
+    var details = data.videoDetails || {};
+    var streaming = data.streamingData || {};
+    var title = details.title || titleFromHtml(html);
+    var durationSeconds = parseInt(details.lengthSeconds, 10);
+
+    if (details.isLive || details.isLiveContent) {
+      throw new Error('Live streams not supported');
+    }
+
+    var qualities = [];
+    var progressive = streaming.formats || [];
+    progressive.forEach(function (f) {
+      if (!formatHasDirectUrl(f)) return;
+      var h = f.height || 0;
+      var label = h ? (h + 'p') : 'Progressive';
+      qualities.push({ label: label, downloadUrl: ensureHttps(f.url), _h: h });
+    });
+
+    var adaptive = streaming.adaptiveFormats || [];
+    var videos = [];
+    var audios = [];
+
+    adaptive.forEach(function (f) {
+      if (!formatHasDirectUrl(f)) return;
+      var mime = (f.mimeType || '').toLowerCase();
+      if (mime.indexOf('video/') === 0) {
+        videos.push(f);
+      } else if (mime.indexOf('audio/') === 0) {
+        audios.push(f);
+      }
+    });
+
+    videos.sort(function (a, b) { return (b.height || 0) - (a.height || 0); });
+    audios.sort(function (a, b) { return (b.bitrate || 0) - (a.bitrate || 0); });
+
+    if (videos.length && audios.length) {
+      videos.slice(0, 3).forEach(function (v) {
+        var itag = v.itag;
+        var label = YT_VIDEO_LABELS[itag] || ((v.height || 'HD') + 'p');
+        qualities.push({
+          label: label,
+          isMuxRequired: true,
+          videoUrl: ensureHttps(v.url),
+          audioUrl: ensureHttps(audios[0].url),
+          _h: v.height || 0
+        });
+      });
+    }
+
+    qualities.sort(function (a, b) { return (b._h || 0) - (a._h || 0); });
+    qualities = qualities.map(function (q) {
+      var copy = {
+        label: q.label,
+        downloadUrl: q.downloadUrl,
+        isMuxRequired: q.isMuxRequired,
+        videoUrl: q.videoUrl,
+        audioUrl: q.audioUrl
+      };
+      if (copy.isMuxRequired) delete copy.downloadUrl;
+      if (!copy.isMuxRequired) {
+        delete copy.isMuxRequired;
+        delete copy.videoUrl;
+        delete copy.audioUrl;
+      }
+      return copy;
+    });
+
+    if (!qualities.length) throw new Error('No YouTube streams found (encrypted URLs skipped)');
+
+    return {
+      title: title,
+      platform: 'youtube',
+      durationSeconds: isNaN(durationSeconds) ? null : durationSeconds,
+      qualities: dedupeQualities(qualities)
+    };
+  }
+
+  function parseFacebook(html) {
+    var title = titleFromHtml(html);
+    var urls = [];
+    var re;
+    var m;
+
+    re = /"browser_native_hd_url"\s*:\s*"([^"]+)"/g;
+    while ((m = re.exec(html)) !== null) urls.push(m[1]);
+
+    re = /"browser_native_sd_url"\s*:\s*"([^"]+)"/g;
+    while ((m = re.exec(html)) !== null) urls.push(m[1]);
+
+    re = /"playable_url"\s*:\s*"([^"]+)"/g;
+    while ((m = re.exec(html)) !== null) urls.push(m[1]);
+
+    re = /"playable_url_quality_hd"\s*:\s*"([^"]+)"/g;
+    while ((m = re.exec(html)) !== null) urls.push(m[1]);
+
+    var ogVideo = metaContent(html, 'og:video');
+    if (ogVideo) urls.push(ogVideo);
+
+    urls = uniqUrls(urls).filter(function (u) { return /^https:\/\//i.test(u); });
+    if (!urls.length) throw new Error('No Facebook stream found');
+
+    var qualities = [];
+    if (urls[0]) qualities.push({ label: 'HD', downloadUrl: urls[0] });
+    if (urls[1]) qualities.push({ label: 'SD', downloadUrl: urls[1] });
+
+    return {
+      title: title,
+      platform: 'facebook',
+      durationSeconds: null,
+      qualities: dedupeQualities(qualities)
+    };
+  }
+
+  function dedupeQualities(list) {
+    var seen = {};
+    var out = [];
+    list.forEach(function (q) {
+      var key = q.downloadUrl || (q.videoUrl + '|' + q.audioUrl);
+      if (seen[key]) return;
+      seen[key] = true;
+      out.push(q);
+    });
+    return out;
+  }
+
+  function parsePage(html, platform) {
+    if (platform === 'youtube') return parseYouTube(html);
+    if (platform === 'instagram') return parseInstagram(html, '');
+    if (platform === 'facebook') return parseFacebook(html);
+    throw new Error('Unsupported platform');
+  }
+
+  function enforceDurationGate(data) {
+    var d = data.durationSeconds;
+    if (d === null || d === undefined || isNaN(d)) return;
+    if (d > MAX_DURATION_SEC) throw new Error(durationErrorMsg());
+  }
+
+  async function extractFromUrl(url) {
+    readEngineFromWindow();
+    var platform = detectPlatformFromUrl(url);
+    var html = ingestPage(url);
+    if (html && typeof html.then === 'function') html = await html;
+    var data = parsePage(html, platform);
+    enforceDurationGate(data);
+    data._source = isNativeApp() ? 'native-parse' : 'web-parse';
     return data;
   }
 
@@ -52,16 +391,12 @@
         blob: function () { return new Blob([bytes]); }
       };
     }
-    var res = await fetch(proxyUrl(sourceUrl));
+    var res = await fetch(getApiBase() + '/api/proxy?url=' + encodeURIComponent(sourceUrl));
     if (!res.ok) {
       var err = await res.json().catch(function () { return {}; });
       throw new Error(err.error || ('Download failed (HTTP ' + res.status + ')'));
     }
     return res;
-  }
-
-  function proxyUrl(sourceUrl) {
-    return getApiBase() + '/api/proxy?url=' + encodeURIComponent(sourceUrl);
   }
 
   composer.addEventListener('submit', function (e) {
@@ -90,7 +425,7 @@
   function addUserMessage(text) {
     var msg = document.createElement('div');
     msg.className = 'msg msg-user';
-    msg.innerHTML = '<div class="bubble bubble-user">' + escapeHtml(text) + '</div>';
+    msg.innerHTML = '<motion.div class="bubble bubble-user">' + escapeHtml(text) + '</motion.div>';
     chatInner.appendChild(msg);
     scrollDown();
   }
@@ -99,12 +434,12 @@
     var msg = document.createElement('div');
     msg.className = 'msg msg-ai';
     msg.innerHTML =
-      '<div class="bubble bubble-ai">' +
-        '<div class="status">' +
-          '<div class="status-dots"><span></span><span></span><span></span></div>' +
+      '<motion.div class="bubble bubble-ai">' +
+        '<motion.div class="status">' +
+          '<motion.div class="status-dots"><span></span><span></span><span></span></motion.div>' +
           '<span class="status-text">' + escapeHtml(label) + '…</span>' +
-        '</div>' +
-      '</div>';
+        '</motion.div>' +
+      '</motion.div>';
     chatInner.appendChild(msg);
     scrollDown();
     return msg;
@@ -123,9 +458,9 @@
 
   function showError(msgEl, message) {
     msgEl.innerHTML =
-      '<div class="bubble bubble-ai">' +
-        '<div class="status error">' + escapeHtml(message) + '</div>' +
-      '</div>';
+      '<motion.div class="bubble bubble-ai">' +
+        '<motion.div class="status error">' + escapeHtml(message) + '</motion.div>' +
+      '</motion.div>';
     scrollDown();
   }
 
@@ -136,15 +471,15 @@
     }).join('');
 
     msgEl.innerHTML =
-      '<div class="result-card">' +
+      '<motion.div class="result-card">' +
         '<p class="result-platform">' + escapeHtml(data.platform || '') + '</p>' +
         '<p class="result-title">' + escapeHtml(data.title || 'Video') + '</p>' +
-        '<div class="result-actions">' +
+        '<motion.div class="result-actions">' +
           '<select class="quality-select" id="quality-' + data._id + '">' + options + '</select>' +
           '<button class="download-btn" id="dl-' + data._id + '">Download</button>' +
-        '</div>' +
+        '</motion.div>' +
         '<p class="result-progress" id="prog-' + data._id + '" hidden></p>' +
-      '</div>';
+      '</motion.div>';
 
     var dlBtn = document.getElementById('dl-' + data._id);
     var select = document.getElementById('quality-' + data._id);
@@ -163,33 +498,12 @@
   async function fetchMetadata(url, statusMsg) {
     try {
       setStatus(statusMsg, STATUS.fetching);
-
-      var apiBase = getApiBase();
-      var data;
-
-      if (isNativeApp()) {
-        data = nativeExtract(url);
-      } else {
-        var res = await fetch(apiBase + '/api/extract', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: url })
-        });
-
-        if (!res.ok) {
-          var errBody = await res.json().catch(function () { return {}; });
-          throw new Error(errBody.error || 'Could not resolve that link');
-        }
-        data = await res.json();
-      }
-
+      var data = await extractFromUrl(url);
       data._id = Date.now();
       showResult(statusMsg, data);
     } catch (err) {
       var msg = err && err.message ? err.message : 'Something went wrong';
-      if (msg === 'Failed to fetch') {
-        msg = 'Server unavailable';
-      }
+      if (msg === 'Failed to fetch') msg = 'Server unavailable';
       showError(statusMsg, msg);
     }
   }
@@ -199,10 +513,10 @@
     return sanitizeFilename(title) + label + '.mp4';
   }
 
-  function setDownloadBusy(dlBtn, selectEl, progEl, busy, label) {
-    dlBtn.disabled = busy;
-    selectEl.disabled = busy;
-    if (busy) {
+  function setDownloadBusy(dlBtn, selectEl, progEl, isBusy, label) {
+    dlBtn.disabled = isBusy;
+    selectEl.disabled = isBusy;
+    if (isBusy) {
       dlBtn.textContent = label || 'Downloading…';
     } else {
       dlBtn.textContent = 'Download';
@@ -333,7 +647,6 @@
     return d.innerHTML;
   }
 
-  /* Android share sheet + deep links */
   window.GravityReceiveShare = function (url) {
     if (!url || busy) return;
     input.value = url;
@@ -344,6 +657,7 @@
   };
 
   function initApp() {
+    readEngineFromWindow();
     if (isNativeApp() && window.GravityNative.getPendingShare) {
       var pending = window.GravityNative.getPendingShare();
       if (pending) window.GravityReceiveShare(pending);
