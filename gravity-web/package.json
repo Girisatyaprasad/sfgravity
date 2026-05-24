@@ -6,5 +6,8 @@
   "scripts": {
     "dev": "node dev-server.js",
     "start": "node dev-server.js"
+  },
+  "dependencies": {
+    "@vercel/functions": "^2.0.0"
   }
 }

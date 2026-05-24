@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { next } from '@vercel/functions';
 
 const ISO_COUNTRY = /^[A-Z]{2}$/;
 
@@ -18,7 +18,7 @@ export const config = {
 
 export default function middleware(request) {
   const countryCode = resolveCountryCode(request);
-  const response = NextResponse.next();
+  const response = next();
 
   response.cookies.set('gravity_country', countryCode, {
     path: '/',
