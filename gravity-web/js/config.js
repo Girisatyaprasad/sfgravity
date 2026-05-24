@@ -1,2 +1,2 @@
-/* API base — empty = same origin. Dev server on :3001 forwards /api automatically. */
+/* API base — empty = same-origin serverless (/api/*). */
 window.GRAVITY_API = '';

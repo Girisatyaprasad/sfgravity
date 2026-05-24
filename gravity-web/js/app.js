@@ -23,6 +23,7 @@
     cookieIsolation: true
   });
   var MAX_DURATION_SEC = 180;
+  var PROXY_TIMEOUT_MS = 15000;
 
   var engine = {
     platformKey: 'generic',
@@ -60,12 +61,22 @@
 
   function getApiBase() {
     if (isNativeApp()) return '';
-    if (window.GRAVITY_API) return window.GRAVITY_API.replace(/\/$/, '');
+    if (window.GRAVITY_API) return String(window.GRAVITY_API).replace(/\/$/, '');
     var meta = document.querySelector('meta[name="gravity-api"]');
-    if (meta && meta.content) return meta.content.replace(/\/$/, '');
-    if (location.protocol === 'file:') return 'http://localhost:3001';
-    if (location.port === '3001') return '';
+    if (meta && meta.content) return String(meta.content).replace(/\/$/, '');
     return '';
+  }
+
+  function fetchWithTimeout(url, options, timeoutMs) {
+    var opts = options || {};
+    if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
+      opts.signal = AbortSignal.timeout(timeoutMs);
+      return fetch(url, opts);
+    }
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, timeoutMs);
+    opts.signal = ctrl.signal;
+    return fetch(url, opts).finally(function () { clearTimeout(timer); });
   }
 
   function durationErrorMsg() {
@@ -93,12 +104,13 @@
   }
 
   function fetchPageWeb(url) {
-    var apiBase = getApiBase();
-    var endpoint = apiBase + '/api/fetch-page?url=' + encodeURIComponent(url);
-    return fetch(endpoint).then(function (res) {
+    var endpoint = getApiBase() + '/api/fetch-page?url=' + encodeURIComponent(url);
+    return fetchWithTimeout(endpoint, { credentials: 'same-origin' }, PROXY_TIMEOUT_MS).then(function (res) {
       if (!res.ok) {
         return res.json().catch(function () { return {}; }).then(function (err) {
-          throw new Error(err.error || ('Page fetch HTTP ' + res.status));
+          var msg = err.error || ('Page fetch HTTP ' + res.status);
+          if (res.status === 504) msg = 'Page fetch timed out';
+          throw new Error(msg);
         });
       }
       return res.text();
@@ -391,10 +403,16 @@
         blob: function () { return new Blob([bytes]); }
       };
     }
-    var res = await fetch(getApiBase() + '/api/proxy?url=' + encodeURIComponent(sourceUrl));
+    var res = await fetchWithTimeout(
+      getApiBase() + '/api/proxy?url=' + encodeURIComponent(sourceUrl),
+      { credentials: 'same-origin' },
+      PROXY_TIMEOUT_MS
+    );
     if (!res.ok) {
       var err = await res.json().catch(function () { return {}; });
-      throw new Error(err.error || ('Download failed (HTTP ' + res.status + ')'));
+      var msg = err.error || ('Download failed (HTTP ' + res.status + ')');
+      if (res.status === 504) msg = 'Download timed out';
+      throw new Error(msg);
     }
     return res;
   }
@@ -584,7 +602,7 @@
         }
         var result = window.GravityNative.saveVideoBase64(btoa(binary), filename);
         if (result && result.indexOf('ERROR:') === 0) {
-          console.error(result);
+          throw new Error(result.slice(6));
         }
       });
       return;

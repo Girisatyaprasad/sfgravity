@@ -1,6 +1,6 @@
-const DESKTOP_UA =
+const PROXY_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-const MAX_BYTES = 5 * 1024 * 1024;
+const MAX_BYTES = 100 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 15000;
 
 function applyCorpHeaders(res) {
@@ -21,9 +21,8 @@ export default async function handler(req, res) {
   try {
     const upstream = await fetch(target, {
       headers: {
-        'User-Agent': DESKTOP_UA,
-        Accept: 'text/html,application/json,*/*',
-        'Accept-Language': 'en-US,en;q=0.9',
+        'User-Agent': PROXY_UA,
+        Accept: '*/*',
       },
       redirect: 'follow',
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
@@ -43,7 +42,7 @@ export default async function handler(req, res) {
       if (done) break;
       total += value.length;
       if (total > MAX_BYTES) {
-        res.status(413).json({ error: 'Page exceeds 5MB cap' });
+        res.status(413).json({ error: 'Media exceeds size cap' });
         return;
       }
       chunks.push(value);
@@ -56,14 +55,13 @@ export default async function handler(req, res) {
       offset += chunk.length;
     }
 
-    const text = new TextDecoder('utf-8', { fatal: false }).decode(merged);
-
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.status(200).send(text);
+    const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
+    res.setHeader('Content-Type', contentType);
+    res.status(200).send(Buffer.from(merged));
   } catch (e) {
     const timedOut = e && (e.name === 'TimeoutError' || e.name === 'AbortError');
     res.status(timedOut ? 504 : 502).json({
-      error: timedOut ? 'Upstream fetch timed out' : e.message || 'fetch failed',
+      error: timedOut ? 'Upstream fetch timed out' : e.message || 'proxy failed',
     });
   }
 }
