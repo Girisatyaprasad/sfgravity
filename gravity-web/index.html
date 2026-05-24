@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en" class="gravity-pending">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="gravity-api" content="">
+  <style>html.gravity-pending{visibility:hidden}</style>
+  <title>SaveFromGravity — Video Downloader</title>
+  <meta name="description" content="" data-gravity-key="meta.description">
+  <meta name="keywords" content="" data-gravity-key="meta.keywords">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="" data-gravity-key="og.title">
+  <meta property="og:description" content="" data-gravity-key="og.description">
+  <link rel="canonical" href="" data-gravity-key="link.canonical">
+  <script id="gravity-schema" type="application/ld+json" data-gravity-key="schema.app">{}</script>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/gravity-init.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/app.js" defer></script>
+</head>
+<body>
+  <div class="app">
+
+    <aside class="ad-fixed" id="ad-slot" data-ad-mount="primary" aria-label="Advertisement">
+      <div class="ad-square">
+        <span class="ad-label" data-i18n-key="ad.label">Sponsored</span>
+        <div class="ad-body">
+          <p class="ad-title" data-i18n-key="ad.title">Your ad here</p>
+          <p class="ad-desc" data-i18n-key="ad.desc">Static square ad · top half</p>
+        </div>
+      </div>
+    </aside>
+
+    <main class="content" id="content">
+      <div class="chat" id="chat" aria-live="polite">
+        <div class="chat-inner" id="chat-inner">
+          <div class="welcome" id="welcome">
+            <p class="welcome-title" data-gravity-key="welcome-title">Paste a video link</p>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <form class="composer" id="composer" data-i18n-key="composer.aria" aria-label="Paste video link">
+      <input
+        type="url"
+        id="url-input"
+        class="composer-input"
+        placeholder="Paste video link…"
+        data-i18n-key="input.placeholder"
+        data-i18n-aria="input.aria"
+        aria-label="Video link"
+        autocomplete="off"
+        autocorrect="off"
+        spellcheck="false"
+        enterkeyhint="send"
+        required
+      >
+      <button type="submit" class="composer-send" id="send-btn" data-i18n-key="button.send.aria" aria-label="Send">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 19V5M5 12l7-7 7 7"/>
+        </svg>
+      </button>
+    </form>
+
+  </div>
+</body>
+</html>

@@ -1,0 +1,82 @@
+{
+  "trailingSlash": false,
+  "rewrites": [
+    {
+      "source": "/instagram-reel-downloader",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/instagram-video-downloader",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/youtube-shorts-downloader",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/youtube-video-downloader",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/facebook-video-downloader",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/fb-shorts-downloader",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/download",
+      "destination": "/index.html"
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/:path+/",
+      "destination": "/:path+",
+      "permanent": true
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin"
+        },
+        {
+          "key": "Cross-Origin-Embedder-Policy",
+          "value": "require-corp"
+        }
+      ]
+    },
+    {
+      "source": "/js/(.*)",
+      "headers": [
+        {
+          "key": "Cross-Origin-Resource-Policy",
+          "value": "cross-origin"
+        }
+      ]
+    },
+    {
+      "source": "/css/(.*)",
+      "headers": [
+        {
+          "key": "Cross-Origin-Resource-Policy",
+          "value": "cross-origin"
+        }
+      ]
+    },
+    {
+      "source": "/(.*\\.(?:js|css|wasm|woff2|woff|ttf|otf|eot|svg|png|jpg|jpeg|gif|webp|ico|json|map))",
+      "headers": [
+        {
+          "key": "Cross-Origin-Resource-Policy",
+          "value": "cross-origin"
+        }
+      ]
+    }
+  ]
+}
