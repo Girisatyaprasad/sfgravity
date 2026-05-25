@@ -5,6 +5,12 @@ const path = require('path');
 
 const WEB_ROOT = path.join(__dirname, '..');
 const OUT = path.join(WEB_ROOT, 'vendor', 'ffmpeg');
+const WASM_MARKER = path.join(OUT, 'core', 'ffmpeg-core.wasm');
+
+if (fs.existsSync(WASM_MARKER)) {
+  console.log('FFmpeg vendor present — sync skipped.');
+  process.exit(0);
+}
 
 const PACKAGES = [
   { name: 'core', from: '@ffmpeg/core/dist/esm' },

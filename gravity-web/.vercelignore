@@ -1,1 +1,2 @@
-scripts/
+scripts/smoke-extract.mjs
+dev-server.cjs

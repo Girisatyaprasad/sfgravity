@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "node dev-server.cjs",
     "start": "node dev-server.cjs",
-    "postinstall": "node scripts/copy-ffmpeg-vendor.cjs"
+    "vendor:sync": "node scripts/copy-ffmpeg-vendor.cjs"
   },
   "dependencies": {
     "@ffmpeg/core": "^0.12.6",
