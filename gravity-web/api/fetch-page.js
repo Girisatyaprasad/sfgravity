@@ -1,5 +1,8 @@
-const DESKTOP_UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+import {
+  collectSetCookies,
+  youtubePageHeaders,
+} from './youtube-session.js';
+
 const MAX_BYTES = 5 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 15000;
 
@@ -20,11 +23,7 @@ export default async function handler(req, res) {
 
   try {
     const upstream = await fetch(target, {
-      headers: {
-        'User-Agent': DESKTOP_UA,
-        Accept: 'text/html,application/json,*/*',
-        'Accept-Language': 'en-US,en;q=0.9',
-      },
+      headers: youtubePageHeaders(),
       redirect: 'follow',
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
@@ -58,7 +57,11 @@ export default async function handler(req, res) {
 
     const text = new TextDecoder('utf-8', { fatal: false }).decode(merged);
 
+    const ytCookies = /youtube\.com|youtu\.be/i.test(target)
+      ? collectSetCookies(upstream)
+      : '';
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    if (ytCookies) res.setHeader('X-Gravity-Yt-Cookies', ytCookies);
     res.status(200).send(text);
   } catch (e) {
     const timedOut = e && (e.name === 'TimeoutError' || e.name === 'AbortError');

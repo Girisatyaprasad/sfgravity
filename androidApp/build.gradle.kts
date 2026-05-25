@@ -48,8 +48,8 @@ val webAssets = file("src/main/assets/www")
 
 tasks.register<Copy>("syncWebAssets") {
   from(webSource) {
-    include("index.html", "css/**", "js/**")
-    exclude("dev-server.js", "package.json", "node_modules/**")
+    include("index.html", "css/**", "js/**", "vendor/ffmpeg/**")
+    exclude("dev-server.cjs", "dev-server.js", "package.json", "node_modules/**", "scripts/**")
   }
   into(webAssets)
 }

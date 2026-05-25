@@ -5,10 +5,14 @@
   "description": "SaveFromGravity — sfgravity.online web shell",
   "type": "module",
   "scripts": {
-    "dev": "node dev-server.js",
-    "start": "node dev-server.js"
+    "dev": "node dev-server.cjs",
+    "start": "node dev-server.cjs",
+    "postinstall": "node scripts/copy-ffmpeg-vendor.cjs"
   },
   "dependencies": {
+    "@ffmpeg/core": "^0.12.6",
+    "@ffmpeg/ffmpeg": "^0.12.10",
+    "@ffmpeg/util": "^0.12.1",
     "@vercel/functions": "^2.0.0"
   }
 }

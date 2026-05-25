@@ -51,6 +51,12 @@
     DEFAULT: 'Video length exceeds the 180 second limit.'
   };
 
+  var STREAM_ERRORS = {
+    US: 'Stream restricted by platform security. Please attempt download using lower resolution parameters.',
+    IN: 'Download restricted by network policy. Retrying link compilation or select alternate quality.',
+    DEFAULT: 'Stream restricted by platform security. Please attempt download using lower resolution parameters.'
+  };
+
   var COPY = {
     instagram: {
       US: {
@@ -67,7 +73,8 @@
         'composer.aria': 'Instagram video link form',
         'ad.label': 'Sponsored',
         'ad.title': 'Your ad here',
-        'ad.desc': 'Premium placement'
+        'ad.desc': 'Premium placement',
+        'error.stream_protected': STREAM_ERRORS.US
       },
       IN: {
         lang: 'en-IN',
@@ -83,7 +90,8 @@
         'composer.aria': 'Video download form',
         'ad.label': 'Sponsored',
         'ad.title': 'Advertisement',
-        'ad.desc': 'Supported by ads'
+        'ad.desc': 'Supported by ads',
+        'error.stream_protected': STREAM_ERRORS.IN
       },
       DEFAULT: {
         lang: 'en',
@@ -99,7 +107,8 @@
         'composer.aria': 'Paste video link',
         'ad.label': 'Sponsored',
         'ad.title': 'Your ad here',
-        'ad.desc': 'Standard placement'
+        'ad.desc': 'Standard placement',
+        'error.stream_protected': STREAM_ERRORS.DEFAULT
       }
     },
     youtube: {
@@ -117,7 +126,8 @@
         'composer.aria': 'YouTube video link form',
         'ad.label': 'Sponsored',
         'ad.title': 'Your ad here',
-        'ad.desc': 'Premium placement'
+        'ad.desc': 'Premium placement',
+        'error.stream_protected': STREAM_ERRORS.US
       },
       IN: {
         lang: 'en-IN',
@@ -133,7 +143,8 @@
         'composer.aria': 'Video download form',
         'ad.label': 'Sponsored',
         'ad.title': 'Advertisement',
-        'ad.desc': 'Supported by ads'
+        'ad.desc': 'Supported by ads',
+        'error.stream_protected': STREAM_ERRORS.IN
       },
       DEFAULT: {
         lang: 'en',
@@ -149,7 +160,8 @@
         'composer.aria': 'Paste video link',
         'ad.label': 'Sponsored',
         'ad.title': 'Your ad here',
-        'ad.desc': 'Standard placement'
+        'ad.desc': 'Standard placement',
+        'error.stream_protected': STREAM_ERRORS.DEFAULT
       }
     },
     facebook: {
@@ -167,7 +179,8 @@
         'composer.aria': 'Facebook video link form',
         'ad.label': 'Sponsored',
         'ad.title': 'Your ad here',
-        'ad.desc': 'Premium placement'
+        'ad.desc': 'Premium placement',
+        'error.stream_protected': STREAM_ERRORS.US
       },
       IN: {
         lang: 'en-IN',
@@ -183,7 +196,8 @@
         'composer.aria': 'Video download form',
         'ad.label': 'Sponsored',
         'ad.title': 'Advertisement',
-        'ad.desc': 'Supported by ads'
+        'ad.desc': 'Supported by ads',
+        'error.stream_protected': STREAM_ERRORS.IN
       },
       DEFAULT: {
         lang: 'en',
@@ -199,7 +213,8 @@
         'composer.aria': 'Paste video link',
         'ad.label': 'Sponsored',
         'ad.title': 'Your ad here',
-        'ad.desc': 'Standard placement'
+        'ad.desc': 'Standard placement',
+        'error.stream_protected': STREAM_ERRORS.DEFAULT
       }
     },
     generic: {
@@ -217,7 +232,8 @@
         'composer.aria': 'Paste video link',
         'ad.label': 'Sponsored',
         'ad.title': 'Your ad here',
-        'ad.desc': 'Premium placement'
+        'ad.desc': 'Premium placement',
+        'error.stream_protected': STREAM_ERRORS.US
       },
       IN: {
         lang: 'en-IN',
@@ -233,7 +249,8 @@
         'composer.aria': 'Video download form',
         'ad.label': 'Sponsored',
         'ad.title': 'Advertisement',
-        'ad.desc': 'Supported by ads'
+        'ad.desc': 'Supported by ads',
+        'error.stream_protected': STREAM_ERRORS.IN
       },
       DEFAULT: {
         lang: 'en',
@@ -249,7 +266,8 @@
         'composer.aria': 'Paste video link',
         'ad.label': 'Sponsored',
         'ad.title': 'Your ad here',
-        'ad.desc': 'Standard placement'
+        'ad.desc': 'Standard placement',
+        'error.stream_protected': STREAM_ERRORS.DEFAULT
       }
     }
   };
@@ -454,7 +472,9 @@
     'ad.title': copy['ad.title'],
     'ad.desc': copy['ad.desc'],
     'error.duration_exceeded':
-      DURATION_ERRORS[cluster] || DURATION_ERRORS.DEFAULT
+      DURATION_ERRORS[cluster] || DURATION_ERRORS.DEFAULT,
+    'error.stream_protected':
+      copy['error.stream_protected'] || STREAM_ERRORS[cluster] || STREAM_ERRORS.DEFAULT
   });
 
   var context = Object.freeze({

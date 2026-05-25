@@ -1,5 +1,8 @@
-const PROXY_UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+import {
+  friendlyProxyError,
+  youtubeMediaHeaders,
+} from './youtube-session.js';
+
 const MAX_BYTES = 100 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 15000;
 
@@ -18,18 +21,20 @@ export default async function handler(req, res) {
     return;
   }
 
+  const referer = typeof req.query.referer === 'string' ? req.query.referer : '';
+  const cookies = typeof req.query.cookies === 'string' ? req.query.cookies : '';
+
   try {
     const upstream = await fetch(target, {
-      headers: {
-        'User-Agent': PROXY_UA,
-        Accept: '*/*',
-      },
+      headers: youtubeMediaHeaders(target, { referer, cookies }),
       redirect: 'follow',
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
 
     if (!upstream.ok) {
-      res.status(upstream.status).json({ error: 'Upstream HTTP ' + upstream.status });
+      res.status(upstream.status).json({
+        error: friendlyProxyError(upstream.status, 'Upstream HTTP ' + upstream.status),
+      });
       return;
     }
 

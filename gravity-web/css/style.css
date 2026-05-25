@@ -82,9 +82,10 @@ body {
   aspect-ratio: 1 / 1;
   margin: 0 auto;
   padding: 14px;
-  background: var(--surface);
-  border: 1px dashed var(--border);
-  border-radius: 4px;
+  background: linear-gradient(160deg, #1a1a1a 0%, #0a0a0a 100%);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -110,7 +111,7 @@ body {
 .ad-title {
   font-size: 15px;
   font-weight: 600;
-  color: var(--text-muted);
+  color: rgba(255, 255, 255, 0.78);
 }
 
 .ad-desc {
@@ -320,7 +321,33 @@ body {
 /* Download progress inside result card */
 .result-progress {
   font-size: 12px;
+  line-height: 1.35;
+  margin-top: 8px;
+  color: var(--error);
+}
+
+.result-progress[data-status="ok"] {
   color: var(--text-muted);
+}
+
+.result-progress.stream-warning-panel,
+.result-progress[data-status="warning"] {
+  color: #ffb340;
+  background: rgba(255, 179, 64, 0.08);
+  border: 1px solid rgba(255, 179, 64, 0.28);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.result-card--stream-protected {
+  border: 1px solid rgba(255, 179, 64, 0.22);
+  box-shadow: 0 0 0 1px rgba(255, 179, 64, 0.06) inset;
+}
+
+.download-btn--warn-state {
+  background: transparent;
+  color: #ffb340;
+  border: 1px solid rgba(255, 179, 64, 0.45);
 }
 
 /* ── Fixed bottom prompt bar ── */

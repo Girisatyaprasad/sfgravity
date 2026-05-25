@@ -84,6 +84,33 @@
       'Video too long (max 3 min)';
   }
 
+  function streamProtectedErrorMsg() {
+    readEngineFromWindow();
+    return (engine.copy && engine.copy['error.stream_protected']) ||
+      'Stream restricted by platform security. Please attempt download using lower resolution parameters.';
+  }
+
+  function inspectStreamFailure(err, httpStatus) {
+    var status = httpStatus || (err && err.httpStatus) || 0;
+    var code = err && err.code;
+    var msg = (err && err.message) || String(err || '');
+    if (code === 'STREAM_PROTECTED' || status === 403) return true;
+    if (msg === 'Failed to fetch' || /failed to fetch/i.test(msg)) return true;
+    if (/networkerror/i.test(msg)) return true;
+    if (/cors/i.test(msg) || /preflight/i.test(msg)) return true;
+    if (/upstream http 403/i.test(msg)) return true;
+    if (/blocked the download/i.test(msg)) return true;
+    if (/stream restricted|stream protected|network policy/i.test(msg)) return true;
+    return false;
+  }
+
+  function markStreamProtectedError(err, httpStatus) {
+    var e = err instanceof Error ? err : new Error(String(err || 'Stream protected'));
+    e.httpStatus = httpStatus || e.httpStatus || 0;
+    if (inspectStreamFailure(e, e.httpStatus)) e.code = 'STREAM_PROTECTED';
+    return e;
+  }
+
   function detectPlatformFromUrl(url) {
     var lower = (url || '').toLowerCase();
     if (/youtube\.com|youtu\.be/.test(lower)) return 'youtube';
@@ -113,6 +140,9 @@
           throw new Error(msg);
         });
       }
+      var ytCookies = res.headers.get('X-Gravity-Yt-Cookies');
+      if (ytCookies) window.__GRAVITY_YT_COOKIES__ = ytCookies;
+      window.__GRAVITY_PAGE_URL__ = url;
       return res.text();
     });
   }
@@ -385,10 +415,21 @@
     var data = parsePage(html, platform);
     enforceDurationGate(data);
     data._source = isNativeApp() ? 'native-parse' : 'web-parse';
+    data.pageUrl = url;
     return data;
   }
 
-  async function fetchProxied(sourceUrl) {
+  function humanizeDownloadError(msg, status) {
+    if (!msg) msg = 'Download failed';
+    if (inspectStreamFailure({ message: msg }, status)) return streamProtectedErrorMsg();
+    if (/upstream http 404/i.test(msg) || status === 404) {
+      return 'Stream link expired — fetch the video again';
+    }
+    if (status === 504 || /timed out/i.test(msg)) return 'Download timed out';
+    return msg;
+  }
+
+  async function fetchProxied(sourceUrl, pageUrl) {
     if (isNativeApp()) {
       var b64 = window.GravityNative.proxyFetchBase64(sourceUrl);
       if (!b64 || b64.indexOf('ERROR:') === 0) {
@@ -403,16 +444,21 @@
         blob: function () { return new Blob([bytes]); }
       };
     }
-    var res = await fetchWithTimeout(
-      getApiBase() + '/api/proxy?url=' + encodeURIComponent(sourceUrl),
-      { credentials: 'same-origin' },
-      PROXY_TIMEOUT_MS
-    );
+    var endpoint = getApiBase() + '/api/proxy?url=' + encodeURIComponent(sourceUrl);
+    var referer = pageUrl || window.__GRAVITY_PAGE_URL__ || '';
+    var cookies = window.__GRAVITY_YT_COOKIES__ || '';
+    if (referer) endpoint += '&referer=' + encodeURIComponent(referer);
+    if (cookies) endpoint += '&cookies=' + encodeURIComponent(cookies);
+    var res;
+    try {
+      res = await fetchWithTimeout(endpoint, { credentials: 'same-origin' }, PROXY_TIMEOUT_MS);
+    } catch (netErr) {
+      throw markStreamProtectedError(netErr, 0);
+    }
     if (!res.ok) {
-      var err = await res.json().catch(function () { return {}; });
-      var msg = err.error || ('Download failed (HTTP ' + res.status + ')');
-      if (res.status === 504) msg = 'Download timed out';
-      throw new Error(msg);
+      var errBody = await res.json().catch(function () { return {}; });
+      var fail = new Error(humanizeDownloadError(errBody.error, res.status));
+      throw markStreamProtectedError(fail, res.status);
     }
     return res;
   }
@@ -506,8 +552,15 @@
     dlBtn.addEventListener('click', function () {
       var q = qualities[parseInt(select.value, 10)];
       if (!q || dlBtn.disabled) return;
+      var card = dlBtn.closest('.result-card');
       setDownloadBusy(dlBtn, select, prog, true);
-      runDownload(q, data.title, prog, dlBtn, select);
+      runDownload(q, data.title, prog, dlBtn, select, data.pageUrl, card).catch(function (err) {
+        if (inspectStreamFailure(err, err && err.httpStatus)) {
+          showDownloadStreamWarning(prog, dlBtn, select, card);
+          return;
+        }
+        showDownloadError(prog, dlBtn, select, (err && err.message) || 'Download failed');
+      });
     });
 
     scrollDown();
@@ -531,58 +584,122 @@
     return sanitizeFilename(title) + label + '.mp4';
   }
 
+  function resetDownloadControls(dlBtn, selectEl, progEl, cardEl) {
+    dlBtn.disabled = false;
+    selectEl.disabled = false;
+    dlBtn.textContent = 'Download';
+    dlBtn.classList.remove('download-btn--warn-state');
+    if (cardEl) cardEl.classList.remove('result-card--stream-protected');
+    if (progEl) {
+      progEl.classList.remove('stream-warning-panel');
+      progEl.removeAttribute('data-validation');
+    }
+  }
+
   function setDownloadBusy(dlBtn, selectEl, progEl, isBusy, label) {
     dlBtn.disabled = isBusy;
     selectEl.disabled = isBusy;
     if (isBusy) {
-      dlBtn.textContent = label || 'Downloading…';
+      var status = label || 'Downloading…';
+      dlBtn.textContent = status;
+      progEl.hidden = false;
+      progEl.classList.remove('stream-warning-panel');
+      progEl.setAttribute('data-status', 'progress');
+      progEl.textContent = status;
     } else {
       dlBtn.textContent = 'Download';
     }
-    progEl.hidden = true;
-    progEl.textContent = '';
+  }
+
+  function showDownloadStreamWarning(progEl, dlBtn, selectEl, cardEl) {
+    resetDownloadControls(dlBtn, selectEl, progEl, cardEl);
+    if (cardEl) cardEl.classList.add('result-card--stream-protected');
+    progEl.hidden = false;
+    progEl.className = 'result-progress stream-warning-panel';
+    progEl.setAttribute('data-status', 'warning');
+    progEl.setAttribute('data-validation', 'stream_protected');
+    progEl.setAttribute('role', 'status');
+    progEl.textContent = streamProtectedErrorMsg();
+    dlBtn.classList.add('download-btn--warn-state');
+    if (input) input.focus();
+    scrollDown();
   }
 
   function showDownloadError(progEl, dlBtn, selectEl, message) {
+    resetDownloadControls(dlBtn, selectEl, progEl, dlBtn.closest('.result-card'));
     progEl.hidden = false;
+    progEl.className = 'result-progress';
+    progEl.setAttribute('data-status', 'error');
+    progEl.setAttribute('data-validation', 'download_error');
     progEl.textContent = message;
-    setDownloadBusy(dlBtn, selectEl, progEl, false);
   }
 
   function showDownloadSaved(progEl, dlBtn, selectEl, quality) {
     setDownloadBusy(dlBtn, selectEl, progEl, false);
     progEl.hidden = false;
+    progEl.setAttribute('data-status', 'ok');
     progEl.textContent = quality && quality.label ? quality.label + ' saved' : 'Saved';
   }
 
-  async function runDownload(quality, title, progEl, dlBtn, selectEl) {
+  async function refreshQualityForDownload(quality, pageUrl) {
+    if (!pageUrl || detectPlatformFromUrl(pageUrl) !== 'youtube') return quality;
+    var html = ingestPage(pageUrl);
+    if (html && typeof html.then === 'function') html = await html;
+    var fresh = parsePage(html, 'youtube');
+    var list = fresh.qualities || [];
+    var i;
+    for (i = 0; i < list.length; i++) {
+      if (list[i].label === quality.label) return list[i];
+    }
+    return list[0] || quality;
+  }
+
+  async function runDownload(quality, title, progEl, dlBtn, selectEl, pageUrl, cardEl) {
     try {
       setDownloadBusy(dlBtn, selectEl, progEl, true, 'Downloading…');
 
-      if (quality.isMuxRequired && quality.videoUrl && quality.audioUrl) {
-        var videoRes = await fetchProxied(quality.videoUrl);
-        var audioRes = await fetchProxied(quality.audioUrl);
+      if (pageUrl && detectPlatformFromUrl(pageUrl) === 'youtube') {
+        setDownloadBusy(dlBtn, selectEl, progEl, true, 'Refreshing stream…');
+        quality = await refreshQualityForDownload(quality, pageUrl);
+      }
 
-        setDownloadBusy(dlBtn, selectEl, progEl, true, 'Processing…');
-        var blob = await muxStreams(
+      if (quality.isMuxRequired && quality.videoUrl && quality.audioUrl) {
+        setDownloadBusy(dlBtn, selectEl, progEl, true, 'Downloading video…');
+        var videoRes = await fetchProxied(quality.videoUrl, pageUrl);
+        setDownloadBusy(dlBtn, selectEl, progEl, true, 'Downloading audio…');
+        var audioRes = await fetchProxied(quality.audioUrl, pageUrl);
+
+        setDownloadBusy(dlBtn, selectEl, progEl, true, 'Processing video…');
+        var muxMod = await import('/js/mux-module.js');
+        var blob = await muxMod.muxStreams(
           await videoRes.arrayBuffer(),
           await audioRes.arrayBuffer(),
           function (pct) {
-            dlBtn.textContent = 'Processing ' + pct + '%';
+            var label = 'Processing ' + pct + '%';
+            dlBtn.textContent = label;
+            progEl.textContent = label;
           }
         );
-        saveFile(blob, downloadFilename(title, quality));
+        setDownloadBusy(dlBtn, selectEl, progEl, true, 'Saving file…');
+        await saveFile(blob, downloadFilename(title, quality));
       } else if (quality.downloadUrl) {
-        var mediaRes = await fetchProxied(quality.downloadUrl);
-        saveFile(await mediaRes.blob(), downloadFilename(title, quality));
+        var mediaRes = await fetchProxied(quality.downloadUrl, pageUrl);
+        setDownloadBusy(dlBtn, selectEl, progEl, true, 'Saving file…');
+        await saveFile(await mediaRes.blob(), downloadFilename(title, quality));
       } else {
         throw new Error('No stream for this quality');
       }
 
       showDownloadSaved(progEl, dlBtn, selectEl, quality);
+      if (cardEl) cardEl.classList.remove('result-card--stream-protected');
     } catch (err) {
-      var msg = (err && err.message) || 'Download failed';
-      if (msg === 'Failed to fetch') msg = 'Network error';
+      var status = err && err.httpStatus;
+      if (inspectStreamFailure(err, status)) {
+        showDownloadStreamWarning(progEl, dlBtn, selectEl, cardEl);
+        return;
+      }
+      var msg = humanizeDownloadError(err && err.message, status);
+      if (/abort/i.test(msg)) msg = 'Download timed out';
       showDownloadError(progEl, dlBtn, selectEl, msg);
     }
   }
@@ -591,20 +708,19 @@
     return (name || 'gravity_video').replace(/[^a-z0-9._-]/gi, '_').toLowerCase();
   }
 
-  function saveFile(blob, filename) {
+  async function saveFile(blob, filename) {
     if (isNativeApp() && window.GravityNative.saveVideoBase64) {
-      blob.arrayBuffer().then(function (buf) {
-        var bytes = new Uint8Array(buf);
-        var chunk = 8192;
-        var binary = '';
-        for (var i = 0; i < bytes.length; i += chunk) {
-          binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
-        }
-        var result = window.GravityNative.saveVideoBase64(btoa(binary), filename);
-        if (result && result.indexOf('ERROR:') === 0) {
-          throw new Error(result.slice(6));
-        }
-      });
+      var buf = await blob.arrayBuffer();
+      var bytes = new Uint8Array(buf);
+      var chunk = 8192;
+      var binary = '';
+      for (var i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+      }
+      var result = window.GravityNative.saveVideoBase64(btoa(binary), filename);
+      if (result && result.indexOf('ERROR:') === 0) {
+        throw new Error(result.slice(6));
+      }
       return;
     }
     var a = document.createElement('a');
@@ -614,44 +730,6 @@
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(a.href);
-  }
-
-  async function muxStreams(videoBuf, audioBuf, onProgress) {
-    var FFmpegMod = await import('https://esm.sh/@ffmpeg/ffmpeg@0.12.10');
-    var UtilMod = await import('https://esm.sh/@ffmpeg/util@0.12.1');
-    var ffmpeg = new FFmpegMod.FFmpeg();
-    var base = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
-
-    ffmpeg.on('progress', function (_ref) {
-      var pct = Math.round(_ref.progress * 100);
-      if (onProgress) onProgress(pct);
-    });
-
-    await ffmpeg.load({
-      coreURL: await UtilMod.toBlobURL(base + '/ffmpeg-core.js', 'text/javascript'),
-      wasmURL: await UtilMod.toBlobURL(base + '/ffmpeg-core.wasm', 'application/wasm'),
-    });
-
-    await ffmpeg.writeFile('video.mp4', new Uint8Array(videoBuf));
-    await ffmpeg.writeFile('audio.mp3', new Uint8Array(audioBuf));
-
-    await ffmpeg.exec([
-      '-i', 'video.mp4',
-      '-i', 'audio.mp3',
-      '-c:v', 'copy',
-      '-c:a', 'aac',
-      '-b:a', '128k',
-      '-map', '0:v:0',
-      '-map', '1:a:0',
-      '-shortest',
-      '-movflags', '+faststart',
-      'output.mp4',
-    ]);
-
-    var out = await ffmpeg.readFile('output.mp4');
-    var bytes = out instanceof Uint8Array ? out : new Uint8Array(out);
-    await ffmpeg.terminate();
-    return new Blob([bytes], { type: 'video/mp4' });
   }
 
   function scrollDown() {
